@@ -37,19 +37,28 @@ def check_tickets():
 
     url_init = "https://prod-api.adp.sj.se/public/sales/booking/v3/search"
     
-    # 🔍 CHANGED: Removed "age", removed names, simplified date.
-    # This matches the "Response" structure you showed earlier more closely.
+    # 🔍 CHANGED: Restored 'time' and 'age'. Added 'specialNeed' to match your logs.
     payload = {
-        "journeyDate": { "date": DATE },
-        "origin": { "uicStationCode": ORIGIN_ID, "name": "Arlanda Flygplats" },
-        "destination": { "uicStationCode": DESTINATION_ID, "name": "Gällivare C" },
+        "journeyDate": { 
+            "date": DATE,
+            "time": "00:00" # <-- Restored (Required)
+        },
+        "origin": { 
+            "uicStationCode": ORIGIN_ID,
+            "name": "Arlanda Flygplats" 
+        },
+        "destination": { 
+            "uicStationCode": DESTINATION_ID,
+            "name": "Gällivare C" 
+        },
         "passengers": [
             {
                 "id": "passenger_1",
                 "passengerCategory": {
-                    "type": "ADULT"
-                    # Removed "age": 30 because your log showed "age": null
-                }
+                    "type": "ADULT",
+                    "age": 26 # <-- Restored (Required, can be any adult age)
+                },
+                "specialNeed": "NO" # <-- Added (Safety)
             }
         ]
     }
@@ -85,23 +94,31 @@ def check_tickets():
         journeys = data2.get("journeys", [])
         
         if not journeys:
-            print(">> Search successful, but NO journeys found (Tickets likely not released).")
+            print(">> Search successful, but NO journeys found (Likely not released yet).")
             return
 
         # Check Results
         found_target = False
         for journey in journeys:
             try:
-                arrival_iso = journey.get('arrivalDateTime') or journey['legs'][-1]['arrivalDateTime']
+                # Handle different arrival time locations
+                arrival_iso = journey.get('arrivalDateTime')
+                if not arrival_iso:
+                     legs = journey.get('legs', [])
+                     if legs:
+                        arrival_iso = legs[-1]['arrivalDateTime']
+                
+                if not arrival_iso: continue
+
                 arrival_time = datetime.fromisoformat(arrival_iso).strftime("%H:%M")
                 
+                # Check for morning arrival (approx 08:24)
                 if "08" in arrival_time:
                     is_bookable = journey.get('isBookable', True)
                     price = "Unknown"
                     try:
                         price = journey['priceQuote']['price']['amount']
-                    except: 
-                        pass
+                    except: pass
                     
                     print(f"Found Train! Arrives: {arrival_time} | Bookable: {is_bookable}")
 
@@ -113,7 +130,8 @@ def check_tickets():
                                f"👉 <a href='https://www.sj.se'>Buy Now</a>")
                         send_telegram_alert(msg)
                         found_target = True
-            except:
+            except Exception as e:
+                # print(e) # Silence parsing errors
                 continue
 
     except Exception as e:
