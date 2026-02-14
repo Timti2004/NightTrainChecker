@@ -10,7 +10,7 @@ from datetime import datetime
 DATE = "2026-08-20" 
 
 # Station IDs (Arlanda C -> Gällivare C)
-ORIGIN_ID = "740098197"
+ORIGIN_ID = "740000556"
 DESTINATION_ID = "740000254"
 
 # Secrets
