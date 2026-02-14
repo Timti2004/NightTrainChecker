@@ -14,12 +14,12 @@ DESTINATION_ID = "740000254"  # Gällivare C
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# --- HEADERS (The Magic Part) ---
+# --- HEADERS ---
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Content-Type": "application/json",
     "Accept": "application/json",
-    "ocp-apim-subscription-key": "d6625619def348d38be070027fd24ff6",  # <--- The key you found!
+    "ocp-apim-subscription-key": "d6625619def348d38be070027fd24ff6", # Your magic key
     "x-client-name": "sjse-booking-client"
 }
 
@@ -42,11 +42,25 @@ def check_tickets():
     # STEP 1: Initiate the Search
     url_init = "https://prod-api.adp.sj.se/public/sales/booking/v3/search"
     
+    # FIXED PAYLOAD: Added 'id' to passenger and matched exact structure
     payload = {
-        "journeyDate": { "date": DATE, "time": "00:00" },
-        "origin": { "uicStationCode": ORIGIN_ID, "name": "Arlanda Flygplats" },
-        "destination": { "uicStationCode": DESTINATION_ID, "name": "Gällivare C" },
-        "passengers": [{ "passengerCategory": { "type": "ADULT", "age": 30 } }]
+        "journeyDate": { "date": DATE },
+        "origin": { 
+            "uicStationCode": ORIGIN_ID,
+            "name": "Arlanda Flygplats"
+        },
+        "destination": { 
+            "uicStationCode": DESTINATION_ID,
+            "name": "Gällivare C"
+        },
+        "passengers": [
+            {
+                "id": "passenger_1",  # <--- THIS WAS MISSING
+                "passengerCategory": {
+                    "type": "ADULT"
+                }
+            }
+        ]
     }
 
     try:
@@ -54,23 +68,25 @@ def check_tickets():
         resp1 = requests.post(url_init, headers=HEADERS, json=payload)
         
         if resp1.status_code != 200 and resp1.status_code != 201:
-            print(f"!! Init Error {resp1.status_code}: {resp1.text[:200]}")
+            print(f"!! Init Error {resp1.status_code}")
+            print(f"Response: {resp1.text}")
             return
 
         data1 = resp1.json()
         search_id = data1.get("departureSearchId")
 
         if not search_id:
-            print("!! No search ID returned. Structure changed?")
-            print(data1.keys())
+            # Sometimes results come back immediately without an ID
+            if "journeys" in data1:
+                process_journeys(data1["journeys"])
+                return
+            print("!! No search ID returned. Response keys:", data1.keys())
             return
 
         print(f">> Search initiated. ID: {search_id}")
         
-        # STEP 2: Fetch the Results (The browser does this immediately after)
-        # We wait 1 second to be polite and let the server process
-        time.sleep(1)
-        
+        # STEP 2: Fetch the Results
+        time.sleep(1) # Be polite
         url_results = f"https://prod-api.adp.sj.se/public/sales/booking/v3/search/{search_id}"
         resp2 = requests.get(url_results, headers=HEADERS)
         
@@ -80,53 +96,54 @@ def check_tickets():
 
         data2 = resp2.json()
         journeys = data2.get("journeys", [])
-        
-        if not journeys:
-            print(">> Search successful, but NO journeys found (Sold out or not released).")
-            return
-
-        # STEP 3: Find our Train
-        found_target = False
-        for journey in journeys:
-            try:
-                # Extract arrival time (handling legs if necessary)
-                arrival_iso = journey.get('arrivalDateTime')
-                if not arrival_iso:
-                    # Fallback: Check the last leg
-                    arrival_iso = journey['legs'][-1]['arrivalDateTime']
-                
-                arrival_time = datetime.fromisoformat(arrival_iso).strftime("%H:%M")
-                
-                # We want the morning train (arrives roughly 08:24)
-                if "08" in arrival_time:
-                    is_bookable = journey.get('isBookable', True)
-                    
-                    # Try to get price
-                    price = "Unknown"
-                    try:
-                        price = journey['priceQuote']['price']['amount']
-                    except:
-                        pass
-                    
-                    print(f"Found Train! Arrives: {arrival_time} | Bookable: {is_bookable} | Price: {price}")
-
-                    if is_bookable:
-                        msg = (f"🚨 <b>TICKETS FOUND!</b>\n"
-                               f"Arlanda ➔ Gällivare\n"
-                               f"Date: {DATE}\n"
-                               f"Arrival: {arrival_time}\n"
-                               f"Price: {price} SEK\n"
-                               f"👉 <a href='https://www.sj.se'>Buy Now on SJ.se</a>")
-                        send_telegram_alert(msg)
-                        found_target = True
-            except Exception as e:
-                print(f"Skipping a journey due to parse error: {e}")
-
-        if not found_target:
-            print(">> Train found in schedule but NOT bookable yet.")
+        process_journeys(journeys)
 
     except Exception as e:
         print(f"!! Critical Script Crash: {e}")
+
+def process_journeys(journeys):
+    if not journeys:
+        print(">> Search successful, but NO journeys found (Sold out or not released).")
+        return
+
+    found_target = False
+    for journey in journeys:
+        try:
+            # Extract arrival time safely
+            arrival_iso = journey.get('arrivalDateTime')
+            if not arrival_iso and 'legs' in journey:
+                arrival_iso = journey['legs'][-1]['arrivalDateTime']
+            
+            arrival_time = datetime.fromisoformat(arrival_iso).strftime("%H:%M")
+            
+            # Check for morning arrival (08:24)
+            if "08" in arrival_time:
+                is_bookable = journey.get('isBookable', True)
+                
+                # Try to get price
+                price = "Unknown"
+                try:
+                    price = journey['priceQuote']['price']['amount']
+                except:
+                    pass
+                
+                print(f"Found Train! Arrives: {arrival_time} | Bookable: {is_bookable} | Price: {price}")
+
+                if is_bookable:
+                    msg = (f"🚨 <b>TICKETS FOUND!</b>\n"
+                           f"Arlanda ➔ Gällivare\n"
+                           f"Date: {DATE}\n"
+                           f"Arrival: {arrival_time}\n"
+                           f"Price: {price} SEK\n"
+                           f"👉 <a href='https://www.sj.se'>Buy Now on SJ.se</a>")
+                    send_telegram_alert(msg)
+                    found_target = True
+        except Exception as e:
+            # Skip invalid entries silently
+            continue
+
+    if not found_target:
+        print(">> Train found in schedule but NOT bookable yet.")
 
 if __name__ == "__main__":
     check_tickets()
