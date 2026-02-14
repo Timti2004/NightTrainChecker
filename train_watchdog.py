@@ -6,10 +6,13 @@ import time
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# Switching back to your REAL target date
-DATE = "2026-03-20" 
-ORIGIN_ID = "740000556"  # Arlanda Central
-DESTINATION_ID = "740000254" # Gällivare C
+# 1. TEST DATE: March 20 (Matches your screenshot where tickets exist)
+DATE = "2026-03-20"  
+# Once confirmed working, change this back to "2026-08-20"
+
+# 2. STATIONS: Arlanda Central -> Gällivare C
+ORIGIN_ID = "740000556" 
+DESTINATION_ID = "740000254"
 
 # Secrets
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -44,88 +47,91 @@ def check_tickets():
 
     try:
         resp1 = requests.post(url_init, headers=HEADERS, json=payload)
-        data1 = resp1.json()
-        search_id = data1.get("departureSearchId")
+        if resp1.status_code != 200 and resp1.status_code != 201:
+            print(f"!! Step 1 Error: {resp1.text}")
+            return
 
+        search_id = resp1.json().get("departureSearchId")
         if not search_id:
             print("!! Step 1 failed. No search ID.")
             return
 
         print(f">> Search Session Created: {search_id}")
-        print(">> Waiting for timetable to generate...")
-        time.sleep(2) # Give the server time to find trains
+        time.sleep(1) 
 
-        # STEP 2: FETCH TIMETABLE (The Missing Piece)
-        # Based on your previous offers.json structure, this is the correct results URL
-        url_results = f"https://prod-api.adp.sj.se/public/sales/booking/v3/search/{search_id}/outbound-journeys"
+        # STEP 2: FETCH RESULTS (The Fixed URL)
+        # We now use the URL pattern found in your logs
+        url_results = f"https://prod-api.adp.sj.se/public/sales/booking/v3/departures/search/{search_id}"
         
         resp2 = requests.get(url_results, headers=HEADERS)
-        
-        # If the URL above fails, we try the backup variant
-        if resp2.status_code == 404:
-            url_results = f"https://prod-api.adp.sj.se/public/sales/booking/v3/search/{search_id}/timetable"
-            resp2 = requests.get(url_results, headers=HEADERS)
-
         if resp2.status_code != 200:
-            print(f"!! Step 2 failed ({resp2.status_code}). URL might be different.")
+            print(f"!! Step 2 Error ({resp2.status_code}): {resp2.text[:200]}")
             return
 
         data2 = resp2.json()
         
-        # In this API version, journeys are often under 'journeys' or 'outboundJourneys'
-        journeys = data2.get("journeys") or data2.get("outboundJourneys") or []
-
-        if not journeys:
-            print(">> Timetable received, but it is empty (No trains released yet).")
+        # PARSING: The structure from your uploaded JSON file
+        # Root -> travels -> [0] -> departures
+        travels = data2.get("travels", [])
+        if not travels:
+            print(">> Response valid but 'travels' list is empty.")
             return
 
-        print(f">> SUCCESS! Scanned {len(journeys)} journeys.")
+        departures = travels[0].get("departures", [])
+        print(f">> SUCCESS! Scanned {len(departures)} departures.")
+        
         found_target = False
-
-        for journey in journeys:
-            # Each journey in the list has its own 'id' for prices
-            journey_id = journey.get("id")
-            arrival_iso = journey.get("arrivalDateTime")
-            
-            if not arrival_iso and "legs" in journey:
-                arrival_iso = journey["legs"][-1]["arrivalDateTime"]
+        for dep in departures:
+            journey_id = dep.get("departureId")
+            arrival_iso = dep.get("arrivalDateTime")
             
             if arrival_iso:
                 arrival_time = datetime.fromisoformat(arrival_iso).strftime("%H:%M")
-                print(f"   - Scanned train arriving at {arrival_time}")
+                print(f"   - Train arrives at {arrival_time}")
 
-                # Night train target window (08:08 in your screenshot)
-                if "07:30" < arrival_time < "09:30":
-                    print(f">> 🎯 MATCH FOUND! Checking price for {journey_id}...")
+                # Your target is ~08:08. We check a window of 07:30 - 09:00
+                if "07:30" < arrival_time < "09:00":
+                    print(f">> 🎯 MATCH FOUND! Checking price for ID {journey_id}...")
                     check_prices(journey_id, arrival_time)
                     found_target = True
 
         if not found_target:
-            print(">> No morning night train found in the results.")
+            print(">> Trains found, but none in the 07:30-09:00 arrival window.")
 
     except Exception as e:
         print(f"!! Script Crash: {e}")
 
 def check_prices(journey_id, arrival_time):
-    # STEP 3: CHECK ACTUAL OFFERS (The logic you confirmed earlier)
+    # STEP 3: CHECK OFFERS
     url_offers = f"https://prod-api.adp.sj.se/public/sales/booking/v3/departures/{journey_id}/offers"
     
-    resp = requests.get(url_offers, headers=HEADERS)
-    if resp.status_code == 200:
-        data = resp.json()
-        # Logic to check availability in seatOffers or bedOffers
-        can_book = data.get("available", False)
-        price = data.get("priceFrom", {}).get("price", "N/A")
+    try:
+        resp = requests.get(url_offers, headers=HEADERS)
+        if resp.status_code == 200:
+            data = resp.json()
+            
+            # Check availability (seat or bed)
+            is_available = data.get("available", False)
+            price = "Unknown"
+            
+            # Try to grab the lowest price
+            try:
+                price = data["priceFrom"]["price"]
+            except:
+                pass
 
-        if can_book:
-            msg = (f"🚨 <b>TICKETS FOUND!</b>\n"
-                   f"🚂 Arrives: {arrival_time}\n"
-                   f"💰 Price: {price} SEK\n"
-                   f"👉 <a href='https://www.sj.se'>Book Now</a>")
-            send_telegram_alert(msg)
-            print(">> Alert sent!")
-        else:
-            print(">> Train exists but currently marked as unbookable.")
+            if is_available:
+                msg = (f"🚨 <b>TICKETS FOUND!</b>\n"
+                       f"🚂 Arrives: {arrival_time}\n"
+                       f"💰 Price: {price} SEK\n"
+                       f"📅 Date: {DATE}\n"
+                       f"👉 <a href='https://www.sj.se'>Book Now</a>")
+                send_telegram_alert(msg)
+                print(">> Alert sent!")
+            else:
+                print(">> Train found but marked as unavailable.")
+    except Exception as e:
+        print(f"!! Price check error: {e}")
 
 if __name__ == "__main__":
     check_tickets()
