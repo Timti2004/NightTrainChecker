@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# IMPORTANT: To arrive on the 20th, you must depart on the 19th!
+# NIGHT TRAIN LOGIC: To arrive on the 20th morning, you usually depart on the 19th evening.
 DATE = "2026-08-20" 
 ORIGIN_ID = "740098197"       # Arlanda Flygplats
 DESTINATION_ID = "740000254"  # Gällivare C
@@ -25,8 +25,7 @@ HEADERS = {
 
 def send_telegram_alert(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print(">> No Telegram config. Message:")
-        print(message)
+        print(">> No Telegram config.")
         return
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -37,17 +36,22 @@ def send_telegram_alert(message):
         print(f"!! Telegram Fail: {e}")
 
 def check_tickets():
-    print(f"--- Checking Arlanda ({ORIGIN_ID}) to Gällivare ({DESTINATION_ID}) on {DATE} ---")
+    print(f"--- Checking Arlanda to Gällivare on {DATE} ---")
 
     url_init = "https://prod-api.adp.sj.se/public/sales/booking/v3/search"
     
-    # 🔍 ULTRA-MINIMAL PAYLOAD (Fits ~170 chars)
-    # We removed 'names', 'ids', and 'time' to match the Content-Length hint.
+    # 🔍 FIXED PAYLOAD (Matches your cURL exactly)
+    # - Uses simple strings for origin/destination
+    # - Uses 'departureDate' instead of 'journeyDate'
+    # - Includes 2 Passengers (as seen in your cURL)
     payload = {
-        "journeyDate": { "date": DATE },
-        "origin": { "uicStationCode": ORIGIN_ID },
-        "destination": { "uicStationCode": DESTINATION_ID },
-        "passengers": [{ "passengerCategory": { "type": "ADULT" } }]
+        "origin": ORIGIN_ID,
+        "destination": DESTINATION_ID,
+        "departureDate": DATE,
+        "passengers": [
+            {"passengerCategory": {"type": "ADULT"}},
+            {"passengerCategory": {"type": "ADULT"}}
+        ]
     }
 
     try:
@@ -63,6 +67,9 @@ def check_tickets():
         search_id = data1.get("departureSearchId")
 
         if not search_id:
+            if "journeys" in data1:
+                 process_journeys(data1["journeys"])
+                 return
             print("!! No search ID. Keys:", data1.keys())
             return
 
@@ -79,52 +86,51 @@ def check_tickets():
 
         data2 = resp2.json()
         journeys = data2.get("journeys", [])
-        
-        found_target = False
-        if not journeys:
-            print(">> Search successful, but NO journeys found (Likely not released).")
-            return
-
-        for journey in journeys:
-            try:
-                # Handle arrival time safely
-                arrival_iso = journey.get('arrivalDateTime')
-                if not arrival_iso and 'legs' in journey:
-                    arrival_iso = journey['legs'][-1]['arrivalDateTime']
-                
-                if not arrival_iso: continue
-
-                # Convert to simple string
-                arrival_time = datetime.fromisoformat(arrival_iso).strftime("%H:%M")
-                
-                # We are looking for the morning arrival (approx 08:24)
-                # Since we search for the 19th, this arrival will be on the 20th.
-                if "08" in arrival_time:
-                    is_bookable = journey.get('isBookable', True)
-                    price = "Unknown"
-                    try:
-                        price = journey['priceQuote']['price']['amount']
-                    except: pass
-                    
-                    print(f"Found Train! Arrives: {arrival_time} | Bookable: {is_bookable}")
-
-                    if is_bookable:
-                        msg = (f"🚨 <b>TICKETS FOUND!</b>\n"
-                               f"Arlanda ➔ Gällivare\n"
-                               f"Depart: {DATE}\n"
-                               f"Arrive: {arrival_time}\n"
-                               f"Price: {price} SEK\n"
-                               f"👉 <a href='https://www.sj.se'>Buy Now</a>")
-                        send_telegram_alert(msg)
-                        found_target = True
-            except:
-                continue
-
-        if not found_target:
-            print(">> Train found in schedule but NOT bookable yet.")
+        process_journeys(journeys)
 
     except Exception as e:
         print(f"!! Script Crash: {e}")
+
+def process_journeys(journeys):
+    if not journeys:
+        print(">> Search successful, but NO journeys found (Likely not released).")
+        return
+
+    found_target = False
+    for journey in journeys:
+        try:
+            arrival_iso = journey.get('arrivalDateTime')
+            if not arrival_iso and 'legs' in journey:
+                arrival_iso = journey['legs'][-1]['arrivalDateTime']
+            
+            if not arrival_iso: continue
+
+            arrival_time = datetime.fromisoformat(arrival_iso).strftime("%H:%M")
+            
+            # Look for morning arrival (approx 08:24)
+            if "08" in arrival_time:
+                is_bookable = journey.get('isBookable', True)
+                price = "Unknown"
+                try:
+                    price = journey['priceQuote']['price']['amount']
+                except: pass
+                
+                print(f"Found Train! Arrives: {arrival_time} | Bookable: {is_bookable} | Price: {price}")
+
+                if is_bookable:
+                    msg = (f"🚨 <b>TICKETS FOUND!</b>\n"
+                           f"Arlanda ➔ Gällivare\n"
+                           f"Date: {DATE}\n"
+                           f"Arrival: {arrival_time}\n"
+                           f"Price: {price} SEK\n"
+                           f"👉 <a href='https://www.sj.se'>Buy Now</a>")
+                    send_telegram_alert(msg)
+                    found_target = True
+        except:
+            continue
+
+    if not found_target:
+        print(">> Train found in schedule but NOT bookable yet.")
 
 if __name__ == "__main__":
     check_tickets()
