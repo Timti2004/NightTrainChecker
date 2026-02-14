@@ -7,7 +7,7 @@ from datetime import datetime
 
 # --- CONFIGURATION ---
 # 1. TEST DATE: March 20 (Matches your screenshot where tickets exist)
-DATE = "2026-03-20"  
+DATE = "2026-08-20"  
 # Once confirmed working, change this back to "2026-08-20"
 
 # 2. STATIONS: Arlanda Central -> Gällivare C
