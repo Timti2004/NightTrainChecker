@@ -7,7 +7,7 @@ from datetime import datetime
 
 # --- CONFIGURATION ---
 # Target Departure Date
-DATE = "2026-08-20" 
+DATE = "2026-03-20" 
 
 # Station IDs (Arlanda C -> Gällivare C)
 ORIGIN_ID = "740000556"
