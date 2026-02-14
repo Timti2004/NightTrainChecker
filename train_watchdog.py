@@ -6,10 +6,9 @@ import time
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# IMPORTANT: Departing on the 19th to arrive on the 20th morning.
-DATE = "2026-08-20"
-ORIGIN_ID = "740098197"       # Arlanda Flygplats
-DESTINATION_ID = "740000254"  # Gällivare C
+DATE = "2026-08-20" # Departing 19th for 20th arrival
+ORIGIN_ID = "740098197"
+DESTINATION_ID = "740000254"
 
 # Secrets
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -23,97 +22,62 @@ HEADERS = {
     "x-client-name": "sjse-booking-client"
 }
 
-def send_telegram_alert(message):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print(">> No Telegram config.")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message})
-
 def check_tickets():
-    print(f"--- Checking Arlanda to Gällivare on {DATE} ---")
+    print(f"--- Hunting for the correct URL on {DATE} ---")
 
+    # STEP 1: Get the ID
     url_init = "https://prod-api.adp.sj.se/public/sales/booking/v3/search"
-    
-    # Payload matches your cURL exactly
     payload = {
         "origin": ORIGIN_ID,
         "destination": DESTINATION_ID,
         "departureDate": DATE,
-        "passengers": [
-            {"passengerCategory": {"type": "ADULT"}},
-            {"passengerCategory": {"type": "ADULT"}}
-        ]
+        "passengers": [{"passengerCategory": {"type": "ADULT"}}, {"passengerCategory": {"type": "ADULT"}}]
     }
 
-    try:
-        # STEP 1: Send the Search Request
-        resp = requests.post(url_init, headers=HEADERS, json=payload)
-        
-        if resp.status_code != 200 and resp.status_code != 201:
-            print(f"!! API Error {resp.status_code}: {resp.text[:500]}")
-            return
+    resp1 = requests.post(url_init, headers=HEADERS, json=payload)
+    if resp1.status_code not in [200, 201]:
+        print(f"!! Step 1 Failed: {resp1.status_code}")
+        return
 
-        data = resp.json()
-        
-        # CHECK: Are the journeys right here?
-        journeys = data.get("journeys", [])
-        
-        # If not in "journeys", sometimes they hide in "tripPlans" or "offers"
-        if not journeys and "tripPlans" in data:
-            journeys = data["tripPlans"]
-            
-        if not journeys:
-            print(">> Request successful, but list is empty.")
-            print(f">> Server returned keys: {list(data.keys())}")
-            # If we see 'departureSearchId' but no journeys, THEN we know we need a step 2.
-            if "departureSearchId" in data:
-                 print(">> (It seems we DO need a second step, but let's see the keys first)")
-            return
+    search_id = resp1.json().get("departureSearchId")
+    print(f">> Got Search ID: {search_id}")
+    
+    # STEP 2: The Hunt
+    # We try these patterns one by one. One of them WILL work.
+    base_url = "https://prod-api.adp.sj.se/public/sales/booking/v3/search"
+    
+    candidates = [
+        f"{base_url}/{search_id}/journeys",             # Most likely
+        f"{base_url}/{search_id}/departure-journeys",   # Matches the key name
+        f"{base_url}/{search_id}/outbound",             # Common in travel APIs
+        f"{base_url}/{search_id}/offers",               # Common variant
+        f"{base_url}/{search_id}/prices",               # Another variant
+        f"{base_url}/{search_id}/timetable"             # Another variant
+    ]
 
-        print(f">> Success! Found {len(journeys)} journeys.")
-        process_journeys(journeys)
+    time.sleep(1) # Wait for server to process
 
-    except Exception as e:
-        print(f"!! Script Crash: {e}")
-
-def process_journeys(journeys):
-    found_target = False
-    for journey in journeys:
+    for url in candidates:
+        print(f"Testing: {url.split('/')[-1]}...", end=" ")
         try:
-            # Handle arrival time safely
-            arrival_iso = journey.get('arrivalDateTime')
-            if not arrival_iso and 'legs' in journey:
-                arrival_iso = journey['legs'][-1]['arrivalDateTime']
+            resp = requests.get(url, headers=HEADERS)
             
-            if not arrival_iso: continue
-
-            arrival_time = datetime.fromisoformat(arrival_iso).strftime("%H:%M")
-            
-            # Look for arrival around 08:xx
-            if "08" in arrival_time:
-                is_bookable = journey.get('isBookable', True)
-                price = "Unknown"
-                try:
-                    price = journey['priceQuote']['price']['amount']
-                except: pass
+            if resp.status_code == 200:
+                print("✅ BINGO! Found it!")
+                data = resp.json()
                 
-                print(f"Found Train! Arrives: {arrival_time} | Bookable: {is_bookable} | Price: {price}")
-
-                if is_bookable:
-                    msg = (f"🚨 <b>TICKETS FOUND!</b>\n"
-                           f"Arlanda ➔ Gällivare\n"
-                           f"Date: {DATE}\n"
-                           f"Arrive: {arrival_time}\n"
-                           f"Price: {price} SEK\n"
-                           f"👉 <a href='https://www.sj.se'>Buy Now</a>")
-                    send_telegram_alert(msg)
-                    found_target = True
-        except:
-            continue
-
-    if not found_target:
-        print(">> Target train found in schedule but NOT bookable yet.")
+                # Check what keys are inside
+                if isinstance(data, list):
+                    print(f">> It returned a LIST of {len(data)} items.")
+                elif isinstance(data, dict):
+                    print(f">> It returned a DICT with keys: {list(data.keys())}")
+                
+                # If this worked, we stop hunting and print the result
+                return
+            else:
+                print(f"❌ ({resp.status_code})")
+        except Exception as e:
+            print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     check_tickets()
