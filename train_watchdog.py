@@ -6,16 +6,17 @@ import time
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# We look for departure on Aug 19 to arrive on Aug 20 morning
-DATE = "2026-08-19"
-ORIGIN_ID = "740098197"       # Arlanda Flygplats
-DESTINATION_ID = "740000254"  # Gällivare C
+# Target Departure Date
+DATE = "2026-08-20" 
+
+# Station IDs (Arlanda C -> Gällivare C)
+ORIGIN_ID = "740098197"
+DESTINATION_ID = "740000254"
 
 # Secrets
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# Common Headers
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Content-Type": "application/json",
@@ -59,34 +60,38 @@ def check_tickets():
             print(">> No trains found yet (Tickets likely not released).")
             return
 
-        print(f">> Found {len(journeys)} trains. Checking for the Night Train...")
+        print(f">> Success! Found {len(journeys)} trains in schedule.")
 
-        # 2. FIND THE NIGHT TRAIN
+        # 2. FILTER FOR NIGHT TRAIN
+        found_candidate = False
         for journey in journeys:
-            # We need the ID to get offers
-            journey_id = journey.get("id") 
-            if not journey_id: continue
-
-            # Check arrival time
+            journey_id = journey.get("id")
+            
+            # Extract arrival time
             arrival_iso = journey.get("arrivalDateTime")
-            # If arrival is inside a leg, dig for it
             if not arrival_iso and "legs" in journey:
                 arrival_iso = journey["legs"][-1]["arrivalDateTime"]
             
             if not arrival_iso: continue
-
             arrival_time = datetime.fromisoformat(arrival_iso).strftime("%H:%M")
-            
-            # Filter: We strictly want the train arriving around 08:00 - 09:00
+
+            # DEBUG: Print every train seen so you know it works
+            print(f"   - Scanned train arriving at {arrival_time}")
+
+            # Filter: We strictly want the train arriving 08:00 - 09:30
             if "08:00" < arrival_time < "09:30":
-                print(f">> Found Candidate! Arrives: {arrival_time}. Checking Availability...")
+                print(f">> 🎯 MATCH FOUND! Arrives: {arrival_time}. Checking Price...")
                 check_offers(journey_id, arrival_time)
+                found_candidate = True
+
+        if not found_candidate:
+            print(">> Schedule is up, but no train matches the Night Train arrival time (08:00-09:30).")
 
     except Exception as e:
         print(f"!! Script Crash: {e}")
 
 def check_offers(departure_id, arrival_time):
-    # 3. GET OFFERS (The URL you found!)
+    # 3. GET PRICE (Step 2)
     url_offers = f"https://prod-api.adp.sj.se/public/sales/booking/v3/departures/{departure_id}/offers"
     
     try:
@@ -97,30 +102,20 @@ def check_offers(departure_id, arrival_time):
 
         data = resp.json()
         
-        # 4. CHECK AVAILABILITY
-        # The structure is data['seatOffers']['available'] or data['bedOffers']['available']
-        
         is_available = False
         min_price = 99999
         currency = "SEK"
 
-        # Check Bed Offers (Couchette/Sleeper) - Preferred for Night Train
-        bed_offers = data.get("bedOffers", {})
-        if bed_offers.get("available"):
-            is_available = True
-            try:
-                p = float(bed_offers["priceFrom"]["price"])
-                if p < min_price: min_price = p
-            except: pass
-
-        # Check Seat Offers (Backup)
-        seat_offers = data.get("seatOffers", {})
-        if seat_offers.get("available"):
-            is_available = True
-            try:
-                p = float(seat_offers["priceFrom"]["price"])
-                if p < min_price: min_price = p
-            except: pass
+        # Check availability
+        # We check both Bed and Seat offers to be safe
+        for offer_type in ["bedOffers", "seatOffers"]:
+            offers = data.get(offer_type, {})
+            if offers.get("available"):
+                is_available = True
+                try:
+                    p = float(offers["priceFrom"]["price"])
+                    if p < min_price: min_price = p
+                except: pass
 
         if is_available:
             msg = (f"🚨 <b>TICKETS RELEASED!</b>\n"
@@ -133,7 +128,7 @@ def check_offers(departure_id, arrival_time):
             print(f">> AVAILABLE! Price: {min_price}")
             send_telegram_alert(msg)
         else:
-            print(f">> Train found in schedule, but currently SOLD OUT or BLOCKED.")
+            print(f">> Train found, but marked as SOLD OUT or BLOCKED.")
 
     except Exception as e:
         print(f"!! Error parsing offers: {e}")
