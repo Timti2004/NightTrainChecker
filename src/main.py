@@ -32,9 +32,7 @@ def run_watchdog():
         print(">> No trains found yet (Schedule likely not released).")
         # Weekly Heartbeat
         if datetime.now().weekday() == 0:
-            notifier.send(f"🗓 <b>Weekly Report:</b>
-Checking {config.DATE}.
-Status: Schedule not released yet.")
+            notifier.send(f"🗓 <b>Weekly Report:</b>\nChecking {config.DATE}.\nStatus: Schedule not released yet.")
         return
 
     departures = travels[0].get("departures", [])
@@ -66,16 +64,11 @@ Status: Schedule not released yet.")
             offers = client.get_offers(journey_id)
             if offers and offers.get("available"):
                 price = offers.get("priceFrom", {}).get("price", "Unknown")
-                msg = (f"🚨 <b>TICKETS RELEASED!</b>
-"
-                       f"🚂 <b>Night Train Found</b>
-"
-                       f"📅 Date: {config.DATE}
-"
-                       f"🏁 Arrive: {arrival_time}
-"
-                       f"💰 Price: {price} SEK
-"
+                msg = (f"🚨 <b>TICKETS RELEASED!</b>\n"
+                       f"🚂 <b>Night Train Found</b>\n"
+                       f"📅 Date: {config.DATE}\n"
+                       f"🏁 Arrive: {arrival_time}\n"
+                       f"💰 Price: {price} SEK\n"
                        f"👉 <a href='https://www.sj.se'>Buy Now</a>")
                 notifier.send(msg)
                 print(">> TELEGRAM SENT! Tickets are bookable.")
@@ -84,9 +77,9 @@ Status: Schedule not released yet.")
 
     # Weekly report if nothing found
     if not found_target and datetime.now().weekday() == 0:
-        status_msg = f"🗓 <b>Weekly Report:</b>
-Checking {config.DATE}.
-"
+        status_msg = (f"🗓 <b>Weekly Report:</b>\n"
+                      f"Checking {config.DATE}.\n")
+        
         if night_train_warnings:
             status_msg += f"Status: Train found but blocked: {', '.join(night_train_warnings)}"
         else:
