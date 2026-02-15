@@ -16,9 +16,9 @@
     <br />
     <a href="#usage">View Demo</a>
     ·
-    <a href="https://github.com/othneildrew/Best-README-Template/issues">Report Bug</a>
+    <a href="https://github.com/Timti2004/NightTrainChecker/issues">Report Bug</a>
     ·
-    <a href="https://github.com/othneildrew/Best-README-Template/issues">Request Feature</a>
+    <a href="https://github.com/Timti2004/NightTrainChecker/issues">Request Feature</a>
   </p>
 </div>
 
