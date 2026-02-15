@@ -15,3 +15,4 @@ TEST_TELEGRAM = False
 # Secrets (retrieved from environment variables)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+SJ_API_KEY = os.environ.get("SJ_API_KEY")
