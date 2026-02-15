@@ -96,7 +96,7 @@ You need a destination for the alerts. We use **Telegram** because it's fast and
 3.  Click **New repository secret** and add these two secrets:
     * `TELEGRAM_BOT_TOKEN`: Paste your Bot Token.
     * `TELEGRAM_CHAT_ID`: Paste your Chat ID.
-4.  Open `train_watchdog.py` and configure your trip:
+4.  Open `src/config.py` and configure your trip:
     ```python
     DATE = "2026-08-20"          # Your travel date
     ORIGIN_ID = "740000556"      # Arlanda Central (Default)
@@ -112,7 +112,7 @@ You need a destination for the alerts. We use **Telegram** because it's fast and
 The Watchdog is designed to run automatically, but you can also control it manually.
 
 ### 🔄 Automatic Schedule
-The script is configured to run **daily at 08:00 UTC**. You can change this in `.github/workflows/main.yml`.
+The script is configured to run **daily at 08:00 UTC**. You can change this in `.github/workflows/daily_check.yml`.
 
 ### ⚡ Manual Trigger
 Want to check right now?
@@ -122,7 +122,7 @@ Want to check right now?
 
 ### 🧪 Testing Telegram
 To ensure your alerts are working:
-1.  Edit `train_watchdog.py`.
+1.  Edit `src/config.py`.
 2.  Set `TEST_TELEGRAM = True`.
 3.  Run the workflow manually. You should receive a "Test Message" immediately.
 4.  **Important:** Set it back to `False` afterwards.
